@@ -1,0 +1,117 @@
+# Experiment configuration for the heart-disease benchmark.
+# Every number that affects a result lives here, so a run is fully described by
+# (this file + profile name + git commit + data manifest).
+#
+# Use:  python run.py benchmark --profile smoke|pilot|full
+
+seed: 20261029
+
+data:
+  raw_dir: data/raw                 # processed.<site>.data files from UCI live here
+  sites: [cleveland, hungarian, switzerland, va]
+  # Kaggle "Heart Failure Prediction" CSV (manual download, needs a Kaggle login)
+  kaggle_csv: data/raw/heart.csv
+  # Z-Alizadeh Sani CSV/XLSX (optional external set; manual download)
+  zalizadeh_path: data/raw/Z-Alizadeh sani dataset.xlsx
+  binarise_target: true             # num 0 -> 0 ; num 1..4 -> 1
+  drop_exact_duplicates: true
+  zero_as_missing: [chol, trestbps] # physiologically impossible zeros -> NaN
+  max_missing_frac_global: 0.60     # drop a predictor if missing in more than this share of ALL rows
+  # Input settings compared
+  feature_sets:
+    full13: all                     # every predictor surviving the missingness rule
+    cheap: [age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope]  # drops ca (fluoroscopy) and thal (thallium scan)
+  default_feature_set: full13
+
+preprocessing:
+  numeric: [age, trestbps, chol, thalach, oldpeak, ca]
+  binary: [sex, fbs, exang]
+  categorical: [cp, restecg, slope, thal]
+  missing_indicator: true           # append an indicator for columns that have NaN in the training fold
+  # Category levels come from the UCI code book (schema, not data), so the encoded
+  # column universe has a fixed size in every fold and every resample.
+  categories:
+    cp: [1, 2, 3, 4]
+    restecg: [0, 1, 2]
+    slope: [1, 2, 3]
+    thal: [3, 6, 7]
+
+models: [dummy, logreg, rf, svm, xgb]
+selectors: [none, anova, mi, rfe, l1, rf_importance]
+selector_families:
+  none: control
+  anova: filter
+  mi: filter
+  rfe: wrapper
+  l1: embedded
+  rf_importance: embedded
+k_frac_grid: [0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]   # share of post-encoding columns kept; tuned in the inner loop
+
+profiles:
+  smoke:                            # seconds; only to prove the code runs
+    outer_repeats: 2
+    outer_folds: 3
+    inner_folds: 3
+    n_iter: 4
+    n_jobs: 6
+    models: [dummy, logreg, rf, svm, xgb]
+    selectors: [none, anova, rfe, l1]
+    extras: true
+    n_boot: 200
+    leakage_models: [logreg, svm]
+    leakage_k_fracs: [0.5]
+    loso_seeds: 1
+    stability_resamples: 10
+  pilot:                            # ~hours on a laptop; sanity-check effect sizes
+    outer_repeats: 3
+    outer_folds: 5
+    inner_folds: 5
+    n_iter: 20
+    n_jobs: -1
+    extras: true
+    n_boot: 500
+  full:                             # full protocol
+    outer_repeats: 10
+    outer_folds: 5
+    inner_folds: 5
+    n_iter: 50
+    n_jobs: -1
+    extras: true
+
+tuning:
+  scoring: roc_auc                  # inner-loop objective
+  search: random                    # RandomizedSearchCV, identical n_iter for every model x selector
+
+operating_point:
+  target_sensitivity: 0.90
+  calibration_methods: [platt, isotonic]
+  ece_bins: 10
+
+leakage:
+  selectors: [anova, rfe, l1]
+  k_fracs: [0.3, 0.5]
+  n_iter: 20
+  null_experiment:
+    enabled: true
+    n_noise_features: 50
+    n_permutations: 3
+
+stability:
+  k_values: [3, 5, 8]
+  n_resamples: 50                   # stratified 80% subsamples
+  # Analyst-specified BEFORE seeing results; to be reviewed by a clinical collaborator.
+  clinical_prior_strong: [cp, exang, oldpeak, thalach, ca, thal, slope]
+  clinical_prior_weak: [chol, fbs, trestbps, restecg]
+
+loso:
+  n_iter: 30
+  inner_folds: 5
+  seeds: 3
+  min_class_count: 10               # AUC reported as NaN if a held-out class has fewer than this
+
+stats:
+  alpha: 0.05
+  n_boot: 2000
+  reference_selector: none
+
+output_root: results
